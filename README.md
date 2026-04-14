@@ -109,6 +109,8 @@ Then wire it up in Sendblue (one-time):
 Text your Sendblue-provisioned number from a **different** phone. The agent replies.
 
 > **Gotcha:** `SENDBLUE_FROM_NUMBER` must be your Sendblue-provisioned number (the one people text TO), not your personal cell. Sendblue's API requires it, and misconfiguring it returns either "missing required parameter: from_number" or "Cannot send messages to self".
+>
+> **Fix in one command:** `npm run sendblue:sync` pulls the right number from the Sendblue CLI and writes it to `.env.local`.
 
 Visit `http://localhost:5173` for the debug dashboard (chat, agents, memory, events). You can also chat from the dashboard's Chat tab without Sendblue.
 

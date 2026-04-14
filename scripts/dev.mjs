@@ -105,7 +105,7 @@ function showBanner(url) {
   const from = envVars.SENDBLUE_FROM_NUMBER;
   const fromLine = from
     ? `  Your Sendblue number:        ${from}  ← text this from another phone`
-    : `  ⚠ SENDBLUE_FROM_NUMBER is not set — outbound sends will fail.`;
+    : `  ⚠ SENDBLUE_FROM_NUMBER is not set — outbound sends will fail.\n    Run: npm run sendblue:sync   (pulls it from the Sendblue CLI)`;
 
   console.log(`
 ${C.banner}${line}
