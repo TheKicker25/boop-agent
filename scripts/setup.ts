@@ -58,43 +58,200 @@ async function runConvexDev(): Promise<void> {
   });
 }
 
+function hasBinary(name: string): Promise<boolean> {
+  return new Promise((ok) => {
+    const lookup = process.platform === "win32" ? "where" : "which";
+    const child = spawn(lookup, [name], { stdio: "ignore" });
+    child.on("exit", (code) => ok(code === 0));
+    child.on("error", () => ok(false));
+  });
+}
+
+function runInherit(cmd: string, args: string[]): Promise<void> {
+  return new Promise((ok, fail) => {
+    const child = spawn(cmd, args, { stdio: "inherit", cwd: ROOT });
+    child.on("exit", (code) =>
+      code === 0 ? ok() : fail(new Error(`${cmd} ${args.join(" ")} exited ${code}`)),
+    );
+    child.on("error", fail);
+  });
+}
+
+function runCapture(cmd: string, args: string[]): Promise<string> {
+  return new Promise((ok, fail) => {
+    const child = spawn(cmd, args, { stdio: ["inherit", "pipe", "pipe"], cwd: ROOT });
+    let out = "";
+    child.stdout.on("data", (d) => {
+      const s = d.toString();
+      out += s;
+      process.stdout.write(s);
+    });
+    child.stderr.on("data", (d) => process.stderr.write(d));
+    child.on("exit", (code) =>
+      code === 0 ? ok(out) : fail(new Error(`${cmd} exited ${code}`)),
+    );
+    child.on("error", fail);
+  });
+}
+
+async function sendblueInvoker(): Promise<{ cmd: string; leading: string[] }> {
+  if (await hasBinary("sendblue")) return { cmd: "sendblue", leading: [] };
+  return { cmd: "npx", leading: ["-y", "@sendblue/cli"] };
+}
+
+interface SendblueKeys {
+  apiKey?: string;
+  apiSecret?: string;
+  fromNumber?: string;
+}
+
+function parseSendblueKeys(output: string): SendblueKeys {
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, "");
+  const keys: SendblueKeys = {};
+
+  try {
+    const json = JSON.parse(clean);
+    if (json.api_key_id || json.apiKeyId) keys.apiKey = json.api_key_id ?? json.apiKeyId;
+    if (json.api_secret_key || json.apiSecretKey)
+      keys.apiSecret = json.api_secret_key ?? json.apiSecretKey;
+    if (json.phone_number || json.phoneNumber)
+      keys.fromNumber = json.phone_number ?? json.phoneNumber;
+    if (keys.apiKey && keys.apiSecret) return keys;
+  } catch {
+    /* not json, fall through to text parsing */
+  }
+
+  const idMatch = clean.match(
+    /(?:API[- ]?Key[- ]?ID|sb[- ]?api[- ]?key[- ]?id|api_key_id|Key Id)[:\s]+\"?([A-Za-z0-9_-]{16,})/i,
+  );
+  const secretMatch = clean.match(
+    /(?:Secret[- ]?Key|API[- ]?Secret|sb[- ]?api[- ]?secret[- ]?key|api_secret|Secret)[:\s]+\"?([A-Za-z0-9_-]{16,})/i,
+  );
+  const numMatch = clean.match(
+    /(?:Phone[- ]?Number|From[- ]?Number|number)[:\s]+\"?(\+?\d{10,15})/i,
+  );
+
+  if (idMatch) keys.apiKey = idMatch[1];
+  if (secretMatch) keys.apiSecret = secretMatch[1];
+  if (numMatch) keys.fromNumber = numMatch[1];
+  return keys;
+}
+
+async function importSendblueFromCli(): Promise<SendblueKeys | null> {
+  const { method } = await prompts(
+    {
+      type: "select",
+      name: "method",
+      message: "How do you want to configure Sendblue?",
+      choices: [
+        { title: "Use the Sendblue CLI (I'll run it — fastest)", value: "cli" },
+        { title: "Paste my API keys manually", value: "manual" },
+        { title: "Skip for now", value: "skip" },
+      ],
+      initial: 0,
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  if (method === "manual") return null;
+  if (method === "skip") return { apiKey: "", apiSecret: "", fromNumber: "" };
+
+  const { account } = await prompts({
+    type: "select",
+    name: "account",
+    message: "Do you already have a Sendblue account?",
+    choices: [
+      { title: "Yes — log in", value: "login" },
+      { title: "No — create one with `sendblue setup`", value: "setup" },
+    ],
+    initial: 0,
+  });
+
+  const { cmd, leading } = await sendblueInvoker();
+
+  banner("Sendblue CLI");
+  try {
+    await runInherit(cmd, [...leading, account === "setup" ? "setup" : "login"]);
+    console.log("\nFetching your Sendblue keys…\n");
+    const output = await runCapture(cmd, [...leading, "show-keys"]);
+    const parsed = parseSendblueKeys(output);
+    if (!parsed.apiKey || !parsed.apiSecret) {
+      console.log(
+        `\nCouldn't auto-parse keys from the CLI output. I'll ask for them below — copy/paste from the output above.`,
+      );
+      return null;
+    }
+    console.log(`\n✓ Pulled your Sendblue keys from the CLI.`);
+    if (!parsed.fromNumber) {
+      console.log(`  (Couldn't detect your phone number — you'll be asked for it.)`);
+    }
+    return parsed;
+  } catch (err) {
+    console.log(`\n⚠ Sendblue CLI failed: ${err}`);
+    console.log(`Falling back to manual prompts.`);
+    return null;
+  }
+}
+
 async function main() {
   banner("boop-agent setup");
 
   console.log(`
 What this does:
-  1. Prompts you for Sendblue + Claude config
-  2. Runs \`npx convex dev\` to create a Convex project
-  3. Writes .env.local
+  1. Pulls your Sendblue keys (via their CLI, or you paste them)
+  2. Asks about your Claude model preference
+  3. Runs \`npx convex dev\` to create a Convex project
+  4. Writes .env.local
 
 Before you start:
-  • Sendblue account + number:     https://sendblue.co
   • A Claude Code subscription:    https://claude.com/code
   • Convex account (free tier):    https://convex.dev
+  • Sendblue (free on agent plan): https://sendblue.co
 `);
 
   const existing = readEnv(ENV_PATH);
+  const cli = await importSendblueFromCli();
+
+  const sendblueDefaults = {
+    SENDBLUE_API_KEY: cli?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
+    SENDBLUE_API_SECRET: cli?.apiSecret ?? existing.SENDBLUE_API_SECRET ?? "",
+    SENDBLUE_FROM_NUMBER: cli?.fromNumber ?? existing.SENDBLUE_FROM_NUMBER ?? "",
+  };
+
+  const sendbluePrompts = [] as any[];
+  if (!sendblueDefaults.SENDBLUE_API_KEY) {
+    sendbluePrompts.push({
+      type: "text",
+      name: "SENDBLUE_API_KEY",
+      message: "Sendblue API key id (sb-api-key-id value)",
+      initial: "",
+    });
+  }
+  if (!sendblueDefaults.SENDBLUE_API_SECRET) {
+    sendbluePrompts.push({
+      type: "password",
+      name: "SENDBLUE_API_SECRET",
+      message: "Sendblue API secret",
+      initial: "",
+    });
+  }
+  if (!sendblueDefaults.SENDBLUE_FROM_NUMBER) {
+    sendbluePrompts.push({
+      type: "text",
+      name: "SENDBLUE_FROM_NUMBER",
+      message: "Sendblue from-number (e.g. +15551234567)",
+      initial: "",
+    });
+  }
 
   const answers = await prompts(
     [
-      {
-        type: "text",
-        name: "SENDBLUE_API_KEY",
-        message: "Sendblue API key id (sb-api-key-id value)",
-        initial: existing.SENDBLUE_API_KEY ?? "",
-      },
-      {
-        type: "password",
-        name: "SENDBLUE_API_SECRET",
-        message: "Sendblue API secret",
-        initial: existing.SENDBLUE_API_SECRET ?? "",
-      },
-      {
-        type: "text",
-        name: "SENDBLUE_FROM_NUMBER",
-        message: "Sendblue from-number (e.g. +15551234567)",
-        initial: existing.SENDBLUE_FROM_NUMBER ?? "",
-      },
+      ...sendbluePrompts,
       {
         type: "select",
         name: "BOOP_MODEL",
@@ -126,6 +283,13 @@ Before you start:
       },
     },
   );
+
+  // Merge CLI-sourced defaults with what the user answered (answer wins).
+  Object.assign(answers, {
+    SENDBLUE_API_KEY: answers.SENDBLUE_API_KEY ?? sendblueDefaults.SENDBLUE_API_KEY,
+    SENDBLUE_API_SECRET: answers.SENDBLUE_API_SECRET ?? sendblueDefaults.SENDBLUE_API_SECRET,
+    SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
+  });
 
   const env: Record<string, string> = { ...existing, ...answers };
   delete (env as any).runConvex;
