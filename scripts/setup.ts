@@ -289,6 +289,65 @@ Before you start:
     SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
   });
 
+  // ---- Tunnel configuration ------------------------------------------------
+  banner("Tunnel — public URL for Sendblue to reach your server");
+  console.log(`
+ngrok's FREE plan gives you a NEW public URL every restart, which means
+re-pasting into Sendblue every time. For a stable URL, pick one of:
+
+  1. Free ngrok             (fine for testing / demos — re-paste each restart)
+  2. ngrok RESERVED domain  (paid — stays the same across restarts)
+  3. Cloudflare Tunnel / other static tunnel you set up yourself
+`);
+
+  const { tunnelChoice } = await prompts(
+    {
+      type: "select",
+      name: "tunnelChoice",
+      message: "Which option are you using?",
+      choices: [
+        { title: "Free ngrok — I'll paste a new URL each restart", value: "free" },
+        { title: "ngrok reserved domain (paid)", value: "ngrok-domain" },
+        { title: "Cloudflare Tunnel or another stable URL", value: "static" },
+      ],
+      initial: 0,
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  if (tunnelChoice === "ngrok-domain") {
+    const { NGROK_DOMAIN } = await prompts({
+      type: "text",
+      name: "NGROK_DOMAIN",
+      message: "Your ngrok reserved domain (e.g. boop.ngrok.app, no https://):",
+      initial: existing.NGROK_DOMAIN ?? "",
+    });
+    const clean = (NGROK_DOMAIN ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+    if (clean) {
+      (answers as any).NGROK_DOMAIN = clean;
+      (answers as any).PUBLIC_URL = `https://${clean}`;
+    }
+  } else if (tunnelChoice === "static") {
+    const { PUBLIC_URL } = await prompts({
+      type: "text",
+      name: "PUBLIC_URL",
+      message: "Your stable public URL (e.g. https://boop.mydomain.com):",
+      initial: existing.PUBLIC_URL ?? "",
+    });
+    if (PUBLIC_URL) {
+      (answers as any).PUBLIC_URL = PUBLIC_URL.replace(/\/$/, "");
+      (answers as any).NGROK_DOMAIN = "";
+    }
+  } else {
+    // free ngrok — clear any stale domain and keep PUBLIC_URL at the localhost default
+    (answers as any).NGROK_DOMAIN = "";
+  }
+
   const env: Record<string, string> = { ...existing, ...answers };
   delete (env as any).runConvex;
   if (!env.PUBLIC_URL) env.PUBLIC_URL = `http://localhost:${env.PORT ?? "3456"}`;

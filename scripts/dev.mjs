@@ -37,6 +37,11 @@ function readEnv() {
 }
 const envVars = readEnv();
 const port = envVars.PORT || "3456";
+const ngrokDomain = envVars.NGROK_DOMAIN || "";
+const publicUrl = envVars.PUBLIC_URL || "";
+const hasStaticUrl =
+  publicUrl && !publicUrl.includes("localhost") && !publicUrl.includes("127.0.0.1");
+const useNgrok = !hasStaticUrl || Boolean(ngrokDomain);
 
 // --- binary detection ---------------------------------------------------
 function hasBinary(name) {
@@ -99,7 +104,7 @@ async function waitForNgrokUrl(timeoutMs = 15000) {
   return null;
 }
 
-function showBanner(url) {
+function showBanner(url, stable) {
   const line = "═".repeat(64);
   const webhook = `${url}/sendblue/webhook`;
   const from = envVars.SENDBLUE_FROM_NUMBER;
@@ -107,9 +112,18 @@ function showBanner(url) {
     ? `  Your Sendblue number:        ${from}  ← text this from another phone`
     : `  ⚠ SENDBLUE_FROM_NUMBER is not set — outbound sends will fail.\n    Run: npm run sendblue:sync   (pulls it from the Sendblue CLI)`;
 
+  const headline = stable
+    ? `your STABLE public URL is live.`
+    : `ngrok tunnel is live  (free-plan URL changes every restart).`;
+  const footer = stable
+    ? ``
+    : `\n${C.dim}  ⚠ On free ngrok, paste the new URL into Sendblue every restart.
+    Stable alternatives: ngrok paid (reserved domain) or Cloudflare Tunnel.
+    Re-run \`npm run setup\` to configure one.${C.reset}\n`;
+
   console.log(`
 ${C.banner}${line}
-  ngrok tunnel is live.
+  ${headline}
 
   Public URL:                  ${url}
   Sendblue webhook (inbound):  ${webhook}
@@ -117,16 +131,15 @@ ${fromLine}
 
   → Sendblue dashboard → API Settings → Webhook Configuration
     Add as INBOUND MESSAGE webhook. Paste the URL above.
-${line}${C.reset}
-${C.dim}  ⚠ Free-plan ngrok URLs change every restart. For a stable URL,
-    use an ngrok paid plan (reserved domain) or Cloudflare Tunnel.${C.reset}
-`);
+${line}${C.reset}${footer}`);
 }
 
 // --- main ---------------------------------------------------------------
-const ngrokInstalled = await hasBinary("ngrok");
-if (!ngrokInstalled) {
-  console.log(`
+let ngrokInstalled = false;
+if (useNgrok) {
+  ngrokInstalled = await hasBinary("ngrok");
+  if (!ngrokInstalled) {
+    console.log(`
 ${C.ngrok}! ngrok is not installed — running without a public tunnel.${C.reset}
 ${C.dim}  Install:   brew install ngrok         (macOS)
              or download from https://ngrok.com/download
@@ -135,6 +148,7 @@ ${C.dim}  Install:   brew install ngrok         (macOS)
   Without ngrok you can still use the debug dashboard at http://localhost:5173
   — iMessage replies via Sendblue won't work until your server is reachable.${C.reset}
 `);
+  }
 }
 
 console.log(`\nBoop dev starting on port ${port}. Ctrl-C to stop everything.\n`);
@@ -144,25 +158,24 @@ const children = [
   run("convex", "npx", ["convex", "dev"]),
   run("debug", "npx", ["vite", "--config", "debug/vite.config.ts"]),
 ];
-if (ngrokInstalled) {
-  children.push(
-    run("ngrok", "ngrok", [
-      "http",
-      port,
-      "--log=stdout",
-      "--log-format=term",
-      "--log-level=info",
-    ]),
-  );
+
+if (useNgrok && ngrokInstalled) {
+  const args = ngrokDomain
+    ? ["http", port, `--domain=${ngrokDomain}`, "--log=stdout", "--log-format=term", "--log-level=info"]
+    : ["http", port, "--log=stdout", "--log-format=term", "--log-level=info"];
+  children.push(run("ngrok", "ngrok", args));
   waitForNgrokUrl()
     .then((url) => {
-      if (url) showBanner(url);
+      if (url) showBanner(url, Boolean(ngrokDomain));
       else
         console.log(
           `${C.ngrok}ngrok${C.reset} │ could not read tunnel URL from http://127.0.0.1:4040 — check ngrok output above.`,
         );
     })
     .catch(() => {});
+} else if (hasStaticUrl) {
+  // User has their own tunnel (Cloudflare, Caddy, etc). Just show the banner.
+  setTimeout(() => showBanner(publicUrl, true), 1500);
 }
 
 let shuttingDown = false;
