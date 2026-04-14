@@ -64,6 +64,17 @@ const C = {
   reset: "\x1b[0m",
 };
 
+// Vite's http-proxy attaches its own socket error logger that can't be removed
+// via configure(). EPIPE on WS reconnects is harmless — filter it at the
+// stream level so the logs stay readable.
+const NOISE_TRIGGERS = [
+  /\[vite\] ws proxy socket error/,
+  /Error: write EPIPE/,
+  /AggregateError \[ECONNREFUSED\]/,
+  /\[vite\] ws proxy error/,
+];
+const STACK_LINE = /^\s+at\s/;
+
 function run(name, cmd, args, readyPattern) {
   const child = spawn(cmd, args, {
     cwd: root,
@@ -71,6 +82,7 @@ function run(name, cmd, args, readyPattern) {
   });
   const prefix = `${C[name]}${name.padEnd(6)}${C.reset} │ `;
   let buf = "";
+  let suppressing = false;
   let resolveReady;
   const ready = new Promise((r) => (resolveReady = r));
   const feed = (chunk) => {
@@ -78,9 +90,22 @@ function run(name, cmd, args, readyPattern) {
     let i;
     while ((i = buf.indexOf("\n")) !== -1) {
       const line = buf.slice(0, i);
-      if (line.trim()) process.stdout.write(prefix + line + "\n");
-      if (readyPattern && readyPattern.test(line)) resolveReady();
       buf = buf.slice(i + 1);
+
+      // ANSI-strip for matching without disturbing the display output.
+      const plain = line.replace(/\x1b\[[0-9;]*m/g, "");
+
+      if (NOISE_TRIGGERS.some((r) => r.test(plain))) {
+        suppressing = true;
+        continue;
+      }
+      if (suppressing) {
+        if (STACK_LINE.test(plain) || plain.trim() === "") continue;
+        suppressing = false;
+      }
+
+      if (line.trim()) process.stdout.write(prefix + line + "\n");
+      if (readyPattern && readyPattern.test(plain)) resolveReady();
     }
   };
   child.stdout.on("data", feed);
