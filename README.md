@@ -121,6 +121,99 @@ Text your Sendblue-provisioned number from a **different** phone. The agent repl
 >
 > **Fix in one command:** `npm run sendblue:sync` pulls the right number from the Sendblue CLI and writes it to `.env.local`.
 
+---
+
+## How the Sendblue integration works
+
+Boop uses the [Sendblue CLI](https://github.com/sendblue-api/sendblue-cli) (`@sendblue/cli`) to eliminate almost all manual dashboard work. Three NPM scripts wrap it:
+
+| Command | What it does |
+|---|---|
+| `npm run setup` | Interactive. Offers to run `sendblue login` / `sendblue setup` and pulls `api_key_id` + `api_secret_key` from `sendblue show-keys` into `.env.local`. |
+| `npm run sendblue:sync` | Runs `sendblue lines`, parses your provisioned phone number, and writes `SENDBLUE_FROM_NUMBER` to `.env.local` in E.164 format. Run this anytime your number changes or got set wrong. |
+| `npm run sendblue:webhook -- <url>` | Runs `sendblue webhooks list`, removes stale ngrok/tunnel hooks, and adds `<url>` as a `type=receive` inbound webhook. Called automatically by `npm run dev`. |
+
+### The `npm run dev` lifecycle
+
+```
+ 1. Preflight: confirm convex/_generated/ exists (else prompt to run setup).
+ 2. Spawn four children in parallel, each with a prefixed log stream:
+       server │   (tsx watch server/index.ts)
+       convex │   (npx convex dev — pushes schema + functions)
+       debug  │   (vite dev server on :5173)
+       ngrok  │   (if installed AND no static URL) exposes :PORT
+ 3. Wait for all four readiness signals:
+       server → "listening on :PORT"
+       convex → "Convex functions ready"
+       debug  → "Local:  http://localhost:5173/"
+       ngrok  → tunnel URL visible at http://127.0.0.1:4040
+ 4. Auto-register the webhook (FREE ngrok only, not reserved domains):
+       webhook │ [webhook] removed stale https://old.ngrok-free.app/sendblue/webhook
+       webhook │ [webhook] registered https://new.ngrok-free.app/sendblue/webhook (type=receive)
+ 5. Show the banner with dashboard + public URL + your Sendblue number.
+```
+
+The banner will look like:
+
+```
+════════════════════════════════════════════════════════════════════
+  Boop is ready — ngrok tunnel is live  (webhook auto-registered).
+
+  🐶 Debug dashboard (click me):   http://localhost:5173
+  🌐 Public URL:                   https://abc123.ngrok-free.app
+  📮 Sendblue webhook (inbound):   https://abc123.ngrok-free.app/sendblue/webhook
+  📱 Text this Sendblue number:    +13053369541  (from a DIFFERENT phone)
+════════════════════════════════════════════════════════════════════
+```
+
+### When auto-register fires vs when it doesn't
+
+| Setup | Auto-register fires? | Why |
+|---|---|---|
+| Free ngrok (default) | **Yes**, every boot | URL rotates; dashboard would be stale otherwise |
+| Reserved `NGROK_DOMAIN` | No | URL is stable; configure once in Sendblue dashboard |
+| Static `PUBLIC_URL` (Cloudflare Tunnel etc.) | No | Same reason |
+| `SENDBLUE_AUTO_WEBHOOK=false` | No | Manual opt-out |
+
+### What you'll see in the server logs during a conversation
+
+When someone texts your Sendblue number, expect this sequence in your terminal:
+
+```
+server │ [turn a3f21d] ← +14155551234: "what's on my calendar today?"
+server │ [turn a3f21d] tool: recall({"query":"calendar today"})
+server │ [turn a3f21d] tool: spawn_agent({"integrations":["google-calendar"],"task":"Pull today's events"})
+server │ [agent 9e82c1] spawn: google-calendar [google-calendar] — "Pull today's events"
+server │ [agent 9e82c1] tool: list_events
+server │ [agent 9e82c1] done (completed, 2.1s, in/out tokens 1234/567)
+server │ [turn a3f21d] → reply (3.4s, 140 chars): "Light day — just your 2pm with Sarah..."
+server │ [sendblue] → sent 140 chars to +14155551234
+```
+
+Per-line anatomy:
+
+- **`[turn xxxxxx]`** — one iMessage round trip. Same id across `←` (incoming) → tool calls → `→ reply` → `[sendblue] sent`.
+- **`[agent xxxxxx]`** — a spawned execution agent. Shows `spawn`, each `tool:` it invokes, and `done` with timing + token counts.
+- **`[sendblue]`** — outbound send results. If Sendblue rejects, the error body is logged with a hint about the likely cause (from_number mismatch, self-send, etc.).
+
+The same events are written to Convex (`messages`, `executionAgents`, `agentLogs`, `memoryEvents` tables) and streamed to the debug dashboard in real time.
+
+### When to re-run each Sendblue script
+
+- **First time / after losing `.env.local`** → `npm run setup` (walks through Sendblue + Convex together)
+- **Phone number looks wrong in the banner** → `npm run sendblue:sync`
+- **Webhook went stale in the dashboard and auto-register is off** → `npm run sendblue:webhook -- https://your-url.example.com/sendblue/webhook`
+
+### Disabling auto-register
+
+Add to `.env.local`:
+
+```
+SENDBLUE_AUTO_WEBHOOK=false
+```
+
+`npm run dev` will still show you the webhook URL in the banner so you can paste it yourself.
+
 Visit `http://localhost:5173` for the debug dashboard (chat, agents, memory, events). You can also chat from the dashboard's Chat tab without Sendblue.
 
 **This is the full first-run.** You now have a working agent that chats, remembers, and schedules reminders. Enable integrations (Gmail, Calendar, Notion, Slack) when you want more — see the next section.
