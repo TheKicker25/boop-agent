@@ -1,0 +1,269 @@
+{
+  "id": "boop-agent-onboarding",
+  "title": "Boop Agent Tour",
+  "description": "A guided walkthrough of boop-agent — the dispatcher/executor agent system behind iMessage, with Convex as source of truth.",
+  "version": "1.0.0",
+  "audience": "New Contributors",
+  "prerequisites": [
+    "Basic TypeScript and Node.js familiarity",
+    "Optional: skim the architecture doc for the four-part overview"
+  ],
+  "steps": [
+    {
+      "id": "step-1-overview",
+      "title": "Welcome to boop-agent",
+      "description": "Boop is a small distributed system disguised as a single-server app — a web server in front, Convex for state, a debug dashboard for replay, and a handful of supporting scripts. This tour walks through each piece. Start here with the full codebase; the regions you see roughly map to the four main jobs.",
+      "estimatedTime": 60,
+      "focusDirectory": "",
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-2-runtime-core",
+      "title": "The runtime: server/",
+      "description": "Everything the live agent does happens in the server. The web entry boots an HTTP and WebSocket server, the webhook handler accepts incoming messages from the SMS provider, and a broadcast layer fans events out to the debug dashboard. Read this area top-down to understand a request's life.",
+      "estimatedTime": 90,
+      "focusDirectory": "server",
+      "highlightLayers": [
+        {
+          "id": "server-entry",
+          "name": "Entry & Transport",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "server/index.ts", "type": "file" },
+            { "path": "server/sendblue.ts", "type": "file" },
+            { "path": "server/broadcast.ts", "type": "file" },
+            { "path": "server/heartbeat.ts", "type": "file" }
+          ],
+          "opacity": 0.75,
+          "renderStrategy": "border"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-3-two-agents",
+      "title": "The dispatcher pattern: two agents",
+      "description": "Boop has two agents. The interaction agent is the front door — one per user turn, deciding what to do. The execution agent is spawned per task, ephemeral, runs the work and returns a string. This split is the load-bearing idea of the whole system.",
+      "estimatedTime": 120,
+      "focusDirectory": "server",
+      "highlightLayers": [
+        {
+          "id": "agents",
+          "name": "Agents",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "server/interaction-agent.ts", "type": "file" },
+            { "path": "server/execution-agent.ts", "type": "file" }
+          ],
+          "opacity": 0.85,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "drafts",
+          "name": "Draft gating",
+          "color": "#8b5cf6",
+          "items": [
+            { "path": "server/draft-tools.ts", "type": "file" }
+          ],
+          "opacity": 0.75,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "Open the dispatcher to see its system prompt and tool list",
+          "target": "server/interaction-agent.ts"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-4-memory",
+      "title": "Memory: extract, recall, decay",
+      "description": "The memory subsystem is four files doing four jobs: shapes and tiers, the memory tool server, post-turn fact extraction (fire-and-forget), and a decay loop that runs every six hours. Consolidation lives one level up.",
+      "estimatedTime": 120,
+      "focusDirectory": "server/memory",
+      "highlightLayers": [
+        {
+          "id": "memory-files",
+          "name": "Memory subsystem",
+          "color": "#10b981",
+          "items": [
+            { "path": "server/memory", "type": "directory" },
+            { "path": "server/consolidation.ts", "type": "file" },
+            { "path": "server/embeddings.ts", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-5-automations",
+      "title": "Automations: cron-driven sub-agents",
+      "description": "A thirty-second poll loop wakes up enabled cron entries. When one is due, it spawns an execution agent — the same machinery the dispatcher uses. A small tool surface lets the interaction agent create, list, toggle, and delete automations from any conversation.",
+      "estimatedTime": 75,
+      "focusDirectory": "server",
+      "highlightLayers": [
+        {
+          "id": "automations",
+          "name": "Automations",
+          "color": "#ef4444",
+          "items": [
+            { "path": "server/automations.ts", "type": "file" },
+            { "path": "server/automation-tools.ts", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-6-integrations",
+      "title": "Integrations via Composio",
+      "description": "Boop delegates all third-party tools to Composio. A toolkit-scoped tool server is built fresh per spawn, so a sub-agent only ever sees the tools for the toolkits its task needs. A small set of HTTP routes handles authentication, disconnects, and registry refreshes.",
+      "estimatedTime": 90,
+      "focusDirectory": "server",
+      "highlightLayers": [
+        {
+          "id": "integrations",
+          "name": "Composio bridge",
+          "color": "#06b6d4",
+          "items": [
+            { "path": "server/composio.ts", "type": "file" },
+            { "path": "server/composio-routes.ts", "type": "file" },
+            { "path": "server/integrations", "type": "directory" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-7-convex",
+      "title": "Convex: the source of truth",
+      "description": "All persistent state lives here. The schema defines roughly eleven tables — messages, memory records, execution agents, automations, drafts, and so on. Each sibling module is a set of queries and mutations consumed by the server and the debug dashboard. Read the schema first.",
+      "estimatedTime": 120,
+      "focusDirectory": "convex",
+      "highlightLayers": [
+        {
+          "id": "schema",
+          "name": "Schema",
+          "color": "#a855f7",
+          "items": [
+            { "path": "convex/schema.ts", "type": "file" }
+          ],
+          "opacity": 0.9,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "convex-functions",
+          "name": "Functions",
+          "color": "#6366f1",
+          "items": [
+            { "path": "convex/messages.ts", "type": "file" },
+            { "path": "convex/memoryRecords.ts", "type": "file" },
+            { "path": "convex/agents.ts", "type": "file" },
+            { "path": "convex/automations.ts", "type": "file" },
+            { "path": "convex/drafts.ts", "type": "file" },
+            { "path": "convex/dashboard.ts", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-8-debug-ui",
+      "title": "The debug dashboard",
+      "description": "The debug dashboard is a read-mostly React app that subscribes to Convex. It's how you watch agents run, browse memories, manage drafts, and connect Composio toolkits. Treat it as a passive viewer — the server still owns all writes that matter.",
+      "estimatedTime": 75,
+      "focusDirectory": "debug",
+      "highlightLayers": [
+        {
+          "id": "debug-ui",
+          "name": "Debug UI",
+          "color": "#ec4899",
+          "items": [
+            { "path": "debug/src", "type": "directory" },
+            { "path": "debug/index.html", "type": "file" },
+            { "path": "debug/vite.config.ts", "type": "file" }
+          ],
+          "opacity": 0.75,
+          "renderStrategy": "border"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-9-scripts-config",
+      "title": "Scripts, docs, and configuration",
+      "description": "The scripts directory holds the dev runner, preflight checks, and SMS-sync helpers. The architecture doc is the canonical map; the integrations doc covers Composio specifics; the agent-author guides explain how Claude is expected to work inside the project. The example environment file is the contract for required keys.",
+      "estimatedTime": 60,
+      "focusDirectory": "",
+      "highlightLayers": [
+        {
+          "id": "scripts",
+          "name": "Scripts",
+          "color": "#f97316",
+          "items": [
+            { "path": "scripts", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "docs",
+          "name": "Docs",
+          "color": "#22c55e",
+          "items": [
+            { "path": "ARCHITECTURE.md", "type": "file" },
+            { "path": "INTEGRATIONS.md", "type": "file" },
+            { "path": "README.md", "type": "file" },
+            { "path": "AGENTS.md", "type": "file" },
+            { "path": "CLAUDE.md", "type": "file" },
+            { "path": "CONTRIBUTING.md", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "config",
+          "name": "Config",
+          "color": "#64748b",
+          "items": [
+            { "path": "package.json", "type": "file" },
+            { "path": "tsconfig.json", "type": "file" },
+            { "path": ".env.example", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "step-10-wrap-up",
+      "title": "Where to go next",
+      "description": "You've seen the four parts: the server runtime, Convex state, the debug dashboard, and the surrounding scripts and docs. To dig deeper, read the architecture doc end-to-end, then trace a real request from the SMS webhook through the interaction agent into a spawned execution agent and watch it replay in the dashboard.",
+      "estimatedTime": 45,
+      "focusDirectory": "",
+      "colorMode": "fileTypes"
+    }
+  ],
+  "metadata": {
+    "author": "boop-agent maintainers",
+    "createdAt": "2026-04-27T00:00:00.000Z",
+    "tags": [
+      "onboarding",
+      "architecture",
+      "agents",
+      "convex"
+    ]
+  }
+}
